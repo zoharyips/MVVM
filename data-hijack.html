@@ -5,13 +5,14 @@
     <title>Data hijack | MVVM</title>
 </head>
 <body>
-<div id="zohar">
-    {{ name }}
+<div id="example">
+    <h3>{{ name }}</h3>
+    <p>{{ skills.language }}</p>
 </div>
 <script>
     /* 通过数据劫持，把 data 里面的数据抽取出来成为 vm 的属性 */
     let vm = new Vue({
-        el: '#app',
+        el: '#example',
         data: {name: 'zohar', skills: {language: ['java', 'go', 'php']}}
     });
 
@@ -21,11 +22,14 @@
         this._data = options.data;  // 再挂载一个 _data;
 
         let data = this._data;
-        observe(data);              // 进行数据监听并进行劫持
+        observe(data);              // 进行数据监听并劫持至 _data 成员对象上
     }
 
     /* 方便递归调用，调用另一个类 */
     function observe(data) {
+        if (typeof data !== 'object') {
+            return;
+        }
         return new Observe(data);
     }
 
@@ -36,11 +40,12 @@
      * @constructor
      */
     function Observe(data) {
-        for (let key in data) {     // 遍历所有属性
-            let val = data[key];
-            if (typeof val === 'object') {
-                observe(val);
+        for (let key in data) {                 // 遍历所有属性
+            if (!data.hasOwnProperty(key)) {
+                continue;
             }
+            let val = data[key];
+            observe(val);                       // 递归劫持所有内层对象
             Object.defineProperty(data, key, {
                 configurable: true,
                 enumerable: true,
@@ -49,6 +54,7 @@
                 },
                 set(v) {
                     val = val === v ? val : v;
+                    observe(val);               // 新赋的值也需要进行劫持
                 }
             })
         }

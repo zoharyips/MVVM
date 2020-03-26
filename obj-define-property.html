@@ -15,14 +15,15 @@
         value: 'zohar'          // 值
     });
     /* 注意：get set 属性和 writable value 互斥，同一属性不能有 get set 和 writable value，因此换一个属性 */
+    let val = 20;
     Object.defineProperty(obj, 'age', {
         configurable: true,
         enumerable: true,
         get() {
-            return '20';
+            return val;
         },
         set(v) {
-
+            val = v;
         }
     })
 </script>

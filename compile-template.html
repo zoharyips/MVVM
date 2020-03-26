@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Compile template | MVVM</title>
+</head>
+<body>
+    <div id="example">
+        <h3>{{ name }}</h3>
+        <p>{{ skills.language }}</p>
+    </div>
+<script>
+    /* 通过数据劫持，把 data 里面的数据抽取出来成为 vm 的属性 */
+    let vm = new Vue({
+        el: '#example',
+        data: {name: 'zohar', skills: {language: ['java', 'go', 'php']}}
+    });
+
+    /* 创建 Vue 类 */
+    function Vue(options = {el: undefined}) {
+        this.$options = options;                // 模拟 Vue 将所有属性挂载在 $options 上
+        this._data = options.data;              // 先将 data 挂载到 _data 成员上
+
+        let data = this._data;
+        observe(data);                          // 进行数据监听并递归劫持到 _data 成员对象上
+        for (let key in data) {                 // 通过对象定义属性，将 _data 代理到 vue 实例上
+            if (!data.hasOwnProperty(key)) {
+                continue;
+            }
+            Object.defineProperty(this, key, {
+                enumerable: true,
+                configurable: true,
+                get() {
+                    return this._data[key];
+                },
+                set(v) {
+                    this._data[key] = v;        // 已定义的 setter 会自动劫持新对象
+                }
+            })
+        }
+        new Compile(options.el, this);
+    }
+
+    /* 方便递归调用，调用另一个类 */
+    function observe(data) {
+        return typeof data === 'object' ? new Observe(data) : null;
+    }
+
+    /**
+     * 进行数据劫持主要逻辑
+     * @param data
+     * @returns {*}
+     * @constructor
+     */
+    function Observe(data) {
+        for (let key in data) {                 // 遍历所有属性
+            if (!data.hasOwnProperty(key)) {
+                continue;
+            }
+            let val = data[key];
+            observe(val);                       // 递归劫持所有内层对象
+            Object.defineProperty(data, key, {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    return val;
+                },
+                set(v) {
+                    val = val === v ? val : v;
+                    observe(val);               // 新赋的值也需要进行劫持
+                }
+            })
+        }
+    }
+
+    /**
+     * 编译模板
+     * @param el 实例作用范围
+     * @param vm 实例
+     * @constructor
+     */
+    function Compile(el, vm) {
+        vm.$el = document.querySelector(el);
+        let fragment = document.createDocumentFragment();   // 创建内存文档碎片
+        for (let node = vm.$el.firstChild; node != null; node = vm.$el.firstChild) {
+            fragment.append(node);
+        }
+        replace(fragment);
+        vm.$el.appendChild(fragment);
+        /**
+         * 替换节点内容
+         * @param fragment
+         */
+        function replace(fragment) {
+            Array.from(fragment.childNodes).forEach(function (node) {
+                let text = node.textContent;
+                let reg = /{{(.*)}}/;
+                if (node.nodeType === Node.TEXT_NODE && reg.test(text)) {
+                    let arr = RegExp.$1.split('.');
+                    // console.log(arr);
+                    let val = vm;                               // val 为 vm
+                    arr.forEach(function (e) {                  // [name], [skills, language]
+                        console.log(e + ":" + val[e.trim()]);
+                        val = val[e.trim()];                    // 取值
+                        console.log(val);
+                    });
+                    node.textContent = text.replace(/{{(.*)}}/, val);
+                }
+                if (node.childNodes) {
+                    replace(node);
+                }
+            });
+        }
+    }
+</script>
+</body>
+</html>
