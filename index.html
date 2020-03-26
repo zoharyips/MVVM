@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Obj define property | MVVM</title>
+</head>
+<body>
+<script>
+    /* 对象定义属性，利用对象定义属性实现对对象属性的创建、更改 */
+    let obj = {};
+    Object.defineProperty(obj, 'name', {
+        configurable: true,     // 是否可配置
+        writable: true,         // 是否可写
+        enumerable: true,       // 是否可枚举/遍历
+        value: 'zohar'          // 值
+    });
+    /* 注意：get set 属性和 writable value 互斥，同一属性不能有 get set 和 writable value，因此换一个属性 */
+    Object.defineProperty(obj, 'age', {
+        configurable: true,
+        enumerable: true,
+        get() {
+            return '20';
+        },
+        set(v) {
+
+        }
+    })
+</script>
+</body>
+</html>
