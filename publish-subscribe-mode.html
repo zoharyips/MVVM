@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Publish subscribe mode | MVVM</title>
+</head>
+<body>
+
+<script>
+    /**
+     * 发布者
+     * 拥有管理订阅者和通知订阅者工作的能力
+     * @constructor
+     */
+    function Publisher() {
+        this.subscribers = [];
+        if (typeof Publisher._initialized === 'undefined') {
+            Publisher.prototype.addSubscriber = function (subscriber) {
+                this.subscribers.push(subscriber);
+            };
+            Publisher.prototype.notifyAll = function () {                   // 通知所有订阅者工作
+                this.subscribers.forEach(subscriber => subscriber.doWork());
+            };
+            Publisher._initialized = true;
+        }
+    }
+
+    /**
+     * 订阅者
+     * 可在构造时分配工作，也可自行分配工作。
+     * @constructor
+     */
+    function Subscriber(job = null) {
+        this.job = job;
+        if (typeof Subscriber._initialized === 'undefined') {
+            Subscriber.prototype.allocateTask = function (job) {            // 为订阅者分配工作
+                this.job = job;
+            };
+            Subscriber.prototype.doWork = function () {                     // 订阅者执行工作
+                this.job();
+            };
+            Subscriber._initialized = true;
+        }
+    }
+
+
+    function demo() {
+        let publisher = new Publisher();
+        for (let i = 0; i < 5; i++) {
+            let subscriber = new Subscriber();
+            subscriber.allocateTask(function () {
+                let body = document.getElementsByTagName('body');
+                body[0].innerHTML = '<h1>Hello world : ' + i + '</h1>';
+            });
+            publisher.addSubscriber(subscriber);
+        }
+        publisher.notifyAll();
+    }
+</script>
+</body>
+</html>

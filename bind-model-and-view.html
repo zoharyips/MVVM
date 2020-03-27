@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bind model & view | MVVM</title>
+</head>
+<body>
+<div id="example">
+    <h3>{{ name }}</h3>
+    <p>{{ skills.language }}</p>
+</div>
+<script>
+    /* 通过数据劫持，把 data 里面的数据抽取出来成为 vm 的属性 */
+    let vm = new Vue({
+        el: '#example',
+        data: {name: 'zohar', skills: {language: ['java', 'go', 'php']}}
+    });
+
+    /* 创建 Vue 类 */
+    function Vue(options = {el: undefined}) {
+        this.$options = options;                // 模拟 Vue 将所有属性挂载在 $options 上
+        this._data = options.data;              // 先将 data 挂载到 _data 成员上
+
+        let data = this._data;
+        observe(data);                          // 进行数据监听并递归劫持到 _data 成员对象上
+        for (let key in data) {                 // 通过对象定义属性，将 _data 代理到 vue 实例上
+            if (!data.hasOwnProperty(key)) {
+                continue;
+            }
+            Object.defineProperty(this, key, {
+                enumerable: true,
+                configurable: true,
+                get() {
+                    return this._data[key];
+                },
+                set(v) {
+                    this._data[key] = v;        // 已定义的 setter 会自动劫持新对象
+                }
+            })
+        }
+        new Compile(options.el, this);
+    }
+
+    /* 方便递归调用，调用另一个类 */
+    function observe(data) {
+        return typeof data === 'object' ? new Observe(data) : null;
+    }
+
+    /**
+     * 进行数据劫持主要逻辑
+     * @param data
+     * @returns {*}
+     * @constructor
+     */
+    function Observe(data) {
+        let publisher = new Publisher();
+        for (let key in data) {                 // 遍历所有属性
+            if (!data.hasOwnProperty(key)) {
+                continue;
+            }
+            let val = data[key];
+            observe(val);                       // 递归劫持所有内层对象
+            Object.defineProperty(data, key, {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    /* 在解析时会递归遍历到模板指定的最深层的对象，因此会调用这个 getter，此时将订阅者添加到发布者中，准备让订阅者工作 */
+                    if (Publisher.subscribeToAdd !== null) {
+                        publisher.addSubscriber(Publisher.subscribeToAdd);
+                    }
+                    return val;
+                },
+                set(v) {
+                    val = val === v ? val : v;
+                    observe(val);               // 新赋的值也需要进行劫持
+                    publisher.notifyAll();      // 让所有订阅者更新各自负责节点的 {{ }} 模板内数据
+                }
+            })
+        }
+    }
+
+    /**
+     * 编译模板
+     * @param el 实例作用范围
+     * @param vm 实例
+     * @constructor
+     */
+    function Compile(el, vm) {
+        vm.$el = document.querySelector(el);
+        let fragment = document.createDocumentFragment();   // 创建内存文档碎片
+        for (let node = vm.$el.firstChild; node != null; node = vm.$el.firstChild) {
+            fragment.append(node);
+        }
+        replace(fragment);
+        vm.$el.appendChild(fragment);
+        /**
+         * 替换节点内容
+         * @param fragment
+         */
+        function replace(fragment) {
+            Array.from(fragment.childNodes).forEach(function (node) {       // 遍历作用范围中的所有子节点
+                let text = node.textContent;
+                let reg = /{{(.*)}}/;
+                if (node.nodeType === Node.TEXT_NODE && reg.test(text)) {   // 获取子节点中匹配到的 Mustache 语法
+                    let arr = RegExp.$1.split('.');
+                    // console.log(arr);
+                    let val = vm;                                           // 默认 val 为 vm (至少需要取一次成员值）
+                    arr.forEach(function (e) {                              // [name] 或 [skills, language]
+                        console.log(e + ":" + val[e.trim()]);
+                        val = val[e.trim()];                                // 根据数据项一层一层取值，此时触发 getter
+                    });
+                    node.textContent = text.replace(/{{(.*)}}/, val);       // 首次初始化时替换掉 Mustache 中的标记
+                    new Subscriber(vm, RegExp.$1, function (newVal) {                      // 订阅者将在每次更新数据时更新 Mustache 中的标记
+                        node.textContent = text.replace(/{{(.*)}}/, newVal);
+                    })
+                }
+                if (node.childNodes) {
+                    replace(node);
+                }
+            });
+        }
+    }
+
+
+    /**
+     * 发布者
+     * 拥有管理订阅者和通知订阅者工作的能力
+     * @constructor
+     */
+    function Publisher() {
+        this.subscribers = [];
+        if (typeof Publisher._initialized === 'undefined') {
+            Publisher.prototype.addSubscriber = function (subscriber) {
+                this.subscribers.push(subscriber);
+            };
+            Publisher.prototype.notifyAll = function () {                   // 通知所有订阅者工作
+                this.subscribers.forEach(subscriber => subscriber.doWork());
+            };
+            Publisher.prototype.subscriberToAdd = null;
+            Publisher._initialized = true;
+        }
+    }
+
+    /**
+     * 订阅者
+     * 可在构造时分配工作，也可自行分配工作。
+     * @constructor
+     */
+    function Subscriber(vm, exp, job = null) {
+        this.vm = vm;
+        this.exp = exp;
+        this.job = job;
+        Publisher.subscriberToAdd = this;
+        if (typeof Subscriber._initialized === 'undefined') {
+            Subscriber.prototype.allocateTask = function (job) {            // 为订阅者分配工作
+                this.job = job;
+            };
+            Subscriber.prototype.doWork = function () {                     // 订阅者执行工作
+                let val = this.vm;
+                let arr = this.exp.split('.');
+                arr.forEach(function (member) {                             // 获取到最终的值
+                    val = val[member.trim()];
+                });
+                this.job(val);
+            };
+            Subscriber._initialized = true;
+        }
+    }
+</script>
+</body>
+</html>
