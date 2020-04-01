@@ -10,75 +10,126 @@
     <p>{{ skills.language }}</p>
 </div>
 <script>
-    /* 通过数据劫持，把 data 里面的数据抽取出来成为 vm 的属性 */
+    /* 正则，用于匹配双花括号，即匹配 view */
+    const MUSTACHE_REGEXP = /{{.*}}/;
+
+    /* 创建 Vue 实例 */
     let vm = new Vue({
         el: '#example',
         data: {name: 'zohar', skills: {language: ['java', 'go', 'php']}}
     });
 
-    /* 创建 Vue 类 */
+    /**
+     * 创建 Vue 类型
+     *
+     * 由于 Vue 实例的定义规则为 _{el: ***, data: ***}
+     * 我们需要先解决一个问题：将构造参数中对象的成员转化为 Vue 实例的成员。
+     * 因此进行第一步：数据劫持
+     *
+     * 一、数据劫持
+     *  我们要劫持一个对象的所有所有属性成为另一个对象的所有属性，这只需要简单的属性遍历再复制就行了。
+     *  但是 Vue 对象应该具备功能是：
+     *      1. 当数据模型（Vue 实例）的数据发生改动时，View 必须有所反应。
+     *      2. 当 View 发生变动时，其绑定的数据模型的数据必须相应进行改变。
+     *  这时我们想到，只要将数据模型的所有数据成员设置成一对 getter/setter（存取器） 即可做到啊，
+     *      1. 数据模型的数据发生改动意味着调用 setter。
+     *      2. 初始化 View，为了获取 ViewModel 的数据必须调用 getter；同时我给特定的 View（input 等）设定一个 listener，
+     *         如果 View 的 value 发生变化，listener 触发 setter 更新 ViewModel 的值。
+     *
+     *  因此，此时我们在劫持时还需要进行一个操作：劫持数据同时将数据成员设置为存取器。
+     *  这就需要用到浏览器特性了：ObjectDefineProperty，即第二点：对象定义属性。
+     *
+     * 其次，我们需要在页面初始化的时候，将所有数据显示到视图上，而我们在 Vue 实例上定义了 el 属性，
+     * 该属性将 Vue 实例与视图绑定在了一起，我们需要将该视图下所有模板都初始化为数据模型中的值，
+     * 因此第二步我们需要做的是：渲染模板。
+     *
+     * 二、渲染模板
+     *
+     **/
     function Vue(options = {el: undefined}) {
-        this.$options = options;                // 模拟 Vue 将所有属性挂载在 $options 上
-        this._data = options.data;              // 先将 data 挂载到 _data 成员上
+        /* 将所有属性挂载到 _data 成员下，访问 _data 成员即可访问所有传输进去的数据 */
+        this._data = options.data;
+        /* 将 _data 所有子孙域转化为存取器的形式 */
+        setFieldsToAccessories(this._data);
+        /* 劫持所有 _data 的子成员为 Vue 实例的存取器，也可以说是 Vue 实例代理了 _data 这个数据模型 */
+        dataHijack(this, this._data);
+        /* 将视图挂载到 Vue 实例上，至此，该 Vue 实例可称作是视图模型了，但仍不具备 MVVM 功能 */
+        this.$el = document.querySelector(options.el);
+        /* 将数据渲染到模板上 */
+        renderTemplate(this);
 
-        let data = this._data;
-        observe(data);                          // 进行数据监听并递归劫持到 _data 成员对象上
-        for (let key in data) {                 // 通过对象定义属性，将 _data 代理到 vue 实例上
-            if (!data.hasOwnProperty(key)) {
-                continue;
-            }
-            Object.defineProperty(this, key, {
-                enumerable: true,
-                configurable: true,
-                get() {
-                    return this._data[key];
-                },
-                set(v) {
-                    this._data[key] = v;        // 已定义的 setter 会自动劫持新对象
-                }
-            })
-        }
         new Compile(options.el, this);
     }
 
-    /* 方便递归调用，调用另一个类 */
-    function observe(data) {
-        return typeof data === 'object' ? new Observe(data) : null;
-    }
-
     /**
-     * 进行数据劫持主要逻辑
-     * @param data
-     * @returns {*}
-     * @constructor
-     */
-    function Observe(data) {
-        let publisher = new Publisher();
-        for (let key in data) {                 // 遍历所有属性
-            if (!data.hasOwnProperty(key)) {
-                continue;
-            }
-            let val = data[key];
-            observe(val);                       // 递归劫持所有内层对象
-            Object.defineProperty(data, key, {
+     * 将数据成员转化为存储器
+     *
+     * 由于对于每一个成员，每一层成员都要设置存取器，因此我们需要对数据进行递归地操作，
+     * obj 这棵引用树上所有分支与叶节点都是存取器。
+     *
+     * @param obj 待处理的对象
+     **/
+    function setFieldsToAccessories(obj) {
+        /* 递归终止条件：obj 不是对象，即表示 obj 没有成员，而 obj 已经被上一层定义成存取器了，因此终止递归 */
+        if (typeof obj !== 'object') {
+            return;
+        }
+        /* 将本层所有 obj 的成员定义为存取器 */
+        for (let key in obj) {
+            /* 取出当前 obj 成员的数据，同样的将它的普通数据成员劫持为存取器 */
+            let val = obj[key];
+            setFieldsToAccessories(val);
+            /* 确保该成员所有属性都是存取器后，将该成员本身定义成 obj 的存取器 */
+            Object.defineProperty(obj, key, {
                 configurable: true,
                 enumerable: true,
                 get() {
-                    /* 在解析时会递归遍历到模板指定的最深层的对象，因此会调用这个 getter，此时将订阅者添加到发布者中，准备让订阅者工作 */
-                    if (Publisher.subscribeToAdd !== null) {
-                        publisher.addSubscriber(Publisher.subscribeToAdd);
-                    }
                     return val;
                 },
-                set(v) {
-                    val = val === v ? val : v;
-                    observe(val);               // 新赋的值也需要进行劫持
-                    publisher.notifyAll();      // 让所有订阅者更新各自负责节点的 {{ }} 模板内数据
+                set(newVal) {
+                    if (val === newVal) {
+                        return;
+                    }
+                    val = newVal;
+                    /* 重新设置的值同样需要进行递归操作，确保引用树上所有枝叶都必须是存取器！ */
+                    setFieldsToAccessories(val);
                 }
             })
         }
     }
 
+    /**
+     * 将数据模型中的所有数据以存取器的形式劫持为代理对象的所有成员
+     *
+     * @param agentObj 目标对象，也称代理对象
+     * @param dataModel 数据模型，即数据源
+     **/
+    function dataHijack(agentObj, dataModel) {
+        for (let key in dataModel) {
+            Object.defineProperty(agentObj, key, {
+                enumerable: true,
+                configurable: true,
+                get() {
+                    return dataModel[key];
+                },
+                set(value) {
+                    if (dataModel[key] === value) {
+                        return;
+                    }
+                    dataModel[key] = value;
+                }
+            })
+        }
+    }
+
+    /**
+     * 把视图模型的数据渲染到视图上
+     *
+     * @param viewModel 视图模型
+     **/
+    function renderTemplate(viewModel) {
+
+    }
     /**
      * 编译模板
      * @param el 实例作用范围
@@ -98,20 +149,23 @@
          * @param fragment
          */
         function replace(fragment) {
-            Array.from(fragment.childNodes).forEach(function (node) {       // 遍历作用范围中的所有子节点
+            /* 遍历组件中的每一个子节点，将子节点中的所有双花括号替换为模型的数据 */
+            // for (let i = 0; i < fragment.length; i++) {
+            //
+            // }
+            console.log(fragment);
+            Array.from(fragment.childNodes).forEach(function (node) {
+                /* 获取子节点中的文本，并匹配是否有 Mustache */
                 let text = node.textContent;
-                let reg = /{{(.*)}}/;
-                if (node.nodeType === Node.TEXT_NODE && reg.test(text)) {   // 获取子节点中匹配到的 Mustache 语法
-                    let arr = RegExp.$1.split('.');
-                    // console.log(arr);
-                    let val = vm;                                           // 默认 val 为 vm (至少需要取一次成员值）
-                    arr.forEach(function (e) {                              // [name] 或 [skills, language]
-                        console.log(e + ":" + val[e.trim()]);
-                        val = val[e.trim()];                                // 根据数据项一层一层取值，此时触发 getter
+                if (node.nodeType === Node.TEXT_NODE && MUSTACHE_REGEXP.test(text)) {
+                    let arr = RegExp.$1.split('.');                                     // 获取匹配到的结果
+                    let val = vm;                                                       // 默认 val 为 vm (至少需要取一次成员值）
+                    arr.forEach(function (item) {                                       // [name] 或 [skills, language]
+                        val = val[item.trim()];                                         // 根据数据项一层一层取值，此时触发 getter
                     });
-                    node.textContent = text.replace(/{{(.*)}}/, val);       // 首次初始化时替换掉 Mustache 中的标记
-                    new Subscriber(vm, RegExp.$1, function (newVal) {                      // 订阅者将在每次更新数据时更新 Mustache 中的标记
-                        node.textContent = text.replace(/{{(.*)}}/, newVal);
+                    node.textContent = text.replace(MUSTACHE_REGEXP, val);              // 首次初始化时替换掉 Mustache 中的标记
+                    new Subscriber(vm, RegExp.$1, function (newVal) {                   // 订阅者将在每次更新数据时更新 Mustache 中的标记
+                        node.textContent = text.replace(MUSTACHE_REGEXP, newVal);
                     })
                 }
                 if (node.childNodes) {
@@ -136,7 +190,6 @@
             Publisher.prototype.notifyAll = function () {                   // 通知所有订阅者工作
                 this.subscribers.forEach(subscriber => subscriber.doWork());
             };
-            Publisher.prototype.subscriberToAdd = null;
             Publisher._initialized = true;
         }
     }
@@ -152,9 +205,6 @@
         this.job = job;
         Publisher.subscriberToAdd = this;
         if (typeof Subscriber._initialized === 'undefined') {
-            Subscriber.prototype.allocateTask = function (job) {            // 为订阅者分配工作
-                this.job = job;
-            };
             Subscriber.prototype.doWork = function () {                     // 订阅者执行工作
                 let val = this.vm;
                 let arr = this.exp.split('.');

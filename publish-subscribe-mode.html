@@ -50,7 +50,9 @@
             let subscriber = new Subscriber();
             subscriber.allocateTask(function () {
                 let body = document.getElementsByTagName('body');
-                body[0].innerHTML = '<h1>Hello world : ' + i + '</h1>';
+                let node = document.createElement('h1');
+                node.innerHTML = 'Hello world: ' + i;
+                body[0].appendChild(node);
             });
             publisher.addSubscriber(subscriber);
         }
