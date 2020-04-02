@@ -6,36 +6,17 @@
 </head>
 <body>
 <div id="example">
-    <h3>{{ name }} - {{ email }}</h3>
+    <h3>{{ name }}</h3>
     <p>{{ skills.language }}</p>
-    <br/>
-    <div>
-        <h4>{{ quote }}</h4>
-        <label>
-            Say to {{ name}}:
-            <br/>
-            <input value="{{ signature }}">
-        </label>
-    </div>
 </div>
 <script>
     /* 正则，用于匹配双花括号，即匹配 view */
-    const MUSTACHE_REGEXP = /(^)?({{[^}]*}})($)?/g;
-    const MUSTACHE_LEFT   = '{{';
-    const MUSTACHE_RIGHT  = '}}';
+    const MUSTACHE_REGEXP = /{{.*}}/;
 
     /* 创建 Vue 实例 */
     let vm = new Vue({
         el: '#example',
-        data: {
-            name: 'zohar',
-            email: 'zoharyips@outlook.com',
-            quote: 'Programming by choice!',
-            skills: {
-                language: ['java', 'go', 'php']
-            },
-            signature: 'Hello World!'
-        }
+        data: {name: 'zohar', skills: {language: ['java', 'go', 'php']}}
     });
 
     /**
@@ -63,43 +44,33 @@
      * 因此第二步我们需要做的是：渲染模板。
      *
      * 二、渲染模板
-     *  通过视图模型中的视图对象获取视图作用范围，在作用范围内逐一替换模板语法即可。
-     *
-     * 三、触发视图更新
-     *  通过发布、订阅模式，在 setter 中放置触发器，每进行 set 操作触发视图更新。
-     *  我们不可能每一次 setter 都调用全局的视图渲染，这样太耗费性能了。
-     *  因此，我们需要为每一个模板元素都设置一个订阅者。
-     *  而我们需要弄清楚，订阅者什么时候工作呢？就是在进行 set 操作时工作，
-     *  因此我们需要在每一个 set 方法中让 listener 调用该属性可以影响到的 worker 进行重新渲染的工作，
-     *  而每一层 setter 我们都需要设置 listener，因此我们将在 setFieldsToAccessories 中进行此工作。
      *
      **/
     function Vue(options = {el: undefined}) {
         /* 将所有属性挂载到 _data 成员下，访问 _data 成员即可访问所有传输进去的数据 */
         this._data = options.data;
-        let listener = new Listener();
         /* 将 _data 所有子孙域转化为存取器的形式 */
-        setFieldsToAccessories(this._data, listener);
+        setFieldsToAccessories(this._data);
         /* 劫持所有 _data 的子成员为 Vue 实例的存取器，也可以说是 Vue 实例代理了 _data 这个数据模型 */
         dataHijack(this, this._data);
         /* 将视图挂载到 Vue 实例上，至此，该 Vue 实例可称作是视图模型了，但仍不具备 MVVM 功能 */
         this.$el = document.querySelector(options.el);
         /* 将数据渲染到模板上 */
-        renderTemplate(this, listener);
+        renderTemplate(this);
         /* 单向数据绑定，实现更新模型中的数据触发视图更新 */
+
 
     }
 
     /**
-     * 将数据成员转化为存取器
+     * 将数据成员转化为存储器
      *
      * 由于对于每一个成员，每一层成员都要设置存取器，因此我们需要对数据进行递归地操作，
      * obj 这棵引用树上所有分支与叶节点都是存取器。
      *
-     * @param obj       待处理的对象
-     * @param listener  监听器
+     * @param obj 待处理的对象
      **/
-    function setFieldsToAccessories(obj, listener) {
+    function setFieldsToAccessories(obj) {
         /* 递归终止条件：obj 不是对象，即表示 obj 没有成员，而 obj 已经被上一层定义成存取器了，因此终止递归 */
         if (typeof obj !== 'object') {
             return;
@@ -123,8 +94,6 @@
                     val = newVal;
                     /* 重新设置的值同样需要进行递归操作，确保引用树上所有枝叶都必须是存取器！ */
                     setFieldsToAccessories(val);
-                    /* 监听器通知相关渲染器进行渲染 */
-                    listener.notify(key);
                 }
             })
         }
@@ -158,78 +127,118 @@
      * 把视图模型的数据渲染到视图上
      *
      * @param viewModel 视图模型
-     * @param listener  监听者
      **/
-    function renderTemplate(viewModel, listener) {
-        /* 获取作用访问的 html 代码，将所有模板替换为模型中的数据 */
-        let innerHTML = viewModel.$el.innerHTML;
-        let elements = innerHTML.match(MUSTACHE_REGEXP);
-        for (let i = 0; i < elements.length; i++) {
-            /* 新建渲染器的同时，将渲染器添加进监听器中 */
-            let renderer = new Renderer(viewModel, elements[i]);
-            listener.addWorker(elements[i], renderer);
-            /* 渲染器进行文档加载时渲染 */
-            renderer.work();
-        }
-    }
-
-    /**
-     * 监听器
-     */
-    function Listener() {
-        this.workers = [];
-        if (typeof Listener._initialized === 'undefined') {
-            Listener.prototype.addWorker = function (renderer) {
-                this.workers.push(renderer);
-            };
-            Listener.prototype.notify = function (dataName) {
-                console.log('notifying...');
-                this.workers.forEach(worker => {
-                    console.log(worker);
-                    if (worker.dataName !== dataName) {
-                        return;
-                    }
-                    worker.work()
-                });
-            };
-            Listener._initialized = true;
-        }
-    }
-
-    /**
-     * 渲染器
-     *
-     * @param viewModel 视图模型，用于提供模板所绑定的数据
-     * @param element   每一个最小粒度的模板元素
-     **/
-    function Renderer(viewModel, element) {
-        this.vm = viewModel;
-        this.el = element;
-        if (typeof Renderer._initialized === 'undefined') {
-            /**
-             * 执行渲染工作
-             **/
-            Renderer.prototype.work = function () {
-                console.log('rendering...');
-                let content = this.el.slice(MUSTACHE_LEFT.length, this.el.length - MUSTACHE_LEFT.length).trim();
+    function renderTemplate(viewModel) {
+        /* 遍历操作视图上所有的子节点 */
+        let nodes = viewModel.$el.childNodes;
+        Array.from(nodes).forEach(function (node) {
+            /* 非 Html 元素跳过 */
+            if (node.nodeType !== Node.ELEMENT_NODE) {
+                return;
+            }
+            /* 不包含模板的跳过 */
+            if (!MUSTACHE_REGEXP.test(node.textContent)) {
+                return;
+            }
+            let templateElement = node.textContent.match(MUSTACHE_REGEXP);
+            /* 将匹配到的每一个模板元素替换为模型中的数据 */
+            for (let i = 0; i < templateElement.length; i++) {
+                let content = templateElement[i].slice(2, templateElement[i].length - 2).trim();
                 let arr = content.split('.');
-                let data = this.vm;
+                let val = viewModel;
                 /* 通过迭代取出最深层的值 */
                 arr.forEach(function (item) {
-                    data = data[item];
+                    val = val[item];
                 });
-                this.vm.$el.innerHTML = this.vm.$el.innerHTML.replace(this.el, data);
+                node.textContent = node.textContent.replace(templateElement[i], val);
+            }
+        });
+    }
+    // /**
+    //  * 编译模板
+    //  * @param el 实例作用范围
+    //  * @param vm 实例
+    //  * @constructor
+    //  */
+    // function Compile(el, vm) {
+    //     vm.$el = document.querySelector(el);
+    //     let fragment = document.createDocumentFragment();   // 创建内存文档碎片
+    //     for (let node = vm.$el.firstChild; node != null; node = vm.$el.firstChild) {
+    //         fragment.append(node);
+    //     }
+    //     replace(fragment);
+    //     vm.$el.appendChild(fragment);
+    //     /**
+    //      * 替换节点内容
+    //      * @param fragment
+    //      */
+    //     function replace(fragment) {
+    //         /* 遍历组件中的每一个子节点，将子节点中的所有双花括号替换为模型的数据 */
+    //         // for (let i = 0; i < fragment.length; i++) {
+    //         //
+    //         // }
+    //         console.log(fragment);
+    //         Array.from(fragment.childNodes).forEach(function (node) {
+    //             /* 获取子节点中的文本，并匹配是否有 Mustache */
+    //             let text = node.textContent;
+    //             if (node.nodeType === Node.TEXT_NODE && MUSTACHE_REGEXP.test(text)) {
+    //                 let arr = RegExp.$1.split('.');                                     // 获取匹配到的结果
+    //                 let val = vm;                                                       // 默认 val 为 vm (至少需要取一次成员值）
+    //                 arr.forEach(function (item) {                                       // [name] 或 [skills, language]
+    //                     val = val[item.trim()];                                         // 根据数据项一层一层取值，此时触发 getter
+    //                 });
+    //                 node.textContent = text.replace(MUSTACHE_REGEXP, val);              // 首次初始化时替换掉 Mustache 中的标记
+    //                 new Subscriber(vm, RegExp.$1, function (newVal) {                   // 订阅者将在每次更新数据时更新 Mustache 中的标记
+    //                     node.textContent = text.replace(MUSTACHE_REGEXP, newVal);
+    //                 })
+    //             }
+    //             if (node.childNodes) {
+    //                 replace(node);
+    //             }
+    //         });
+    //     }
+    // }
+    //
+    //
+    /**
+     * 发布者
+     * 拥有管理订阅者和通知订阅者工作的能力
+     * @constructor
+     */
+    function Publisher() {
+        this.subscribers = [];
+        if (typeof Publisher._initialized === 'undefined') {
+            Publisher.prototype.addSubscriber = function (subscriber) {
+                this.subscribers.push(subscriber);
             };
-            /**
-             * 获取渲染器绑定的数据名
-             **/
-            Renderer.prototype.dataName = function() {
-                let dataLevels = this.el.slice(MUSTACHE_LEFT.length, this.el.length - MUSTACHE_LEFT.length).trim().split('.');
-                return dataLevels[dataLevels.length - 1];
+            Publisher.prototype.notifyAll = function () {                   // 通知所有订阅者工作
+                this.subscribers.forEach(subscriber => subscriber.doWork());
             };
-            Renderer._initialized = true;
+            Publisher._initialized = true;
         }
-        console.log('Render: ' + this.dataName() + ' is ready.');
+    }
+
+    /**
+     * 订阅者
+     * 可在构造时分配工作，也可自行分配工作。
+     * @constructor
+     */
+    function Subscriber(vm, exp, job = null) {
+        this.vm = vm;
+        this.exp = exp;
+        this.job = job;
+        Publisher.subscriberToAdd = this;
+        if (typeof Subscriber._initialized === 'undefined') {
+            Subscriber.prototype.doWork = function () {                     // 订阅者执行工作
+                let val = this.vm;
+                let arr = this.exp.split('.');
+                arr.forEach(function (member) {                             // 获取到最终的值
+                    val = val[member.trim()];
+                });
+                this.job(val);
+            };
+            Subscriber._initialized = true;
+        }
     }
 </script>
 </body>
